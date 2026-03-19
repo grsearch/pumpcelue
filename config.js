@@ -4,7 +4,7 @@ require('dotenv').config();
 module.exports = {
   birdeye: {
     apiKey:  process.env.BIRDEYE_API_KEY || '',
-    wsUrl:   'wss://public-api.birdeye.so/socket',
+    wsUrl:   'wss://public-api.birdeye.so/socket/solana',
     restUrl: 'https://public-api.birdeye.so',
   },
   helius: {
