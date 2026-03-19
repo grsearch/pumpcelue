@@ -1,35 +1,35 @@
 // src/birdeyeRest.js
-// BirdEye REST API calls for token metadata (LP, FDV, price)
+// BirdEye REST API：元数据、历史K线、实时价格
 
-const axios = require('axios');
+const axios  = require('axios');
 const config = require('./config');
 
 const api = axios.create({
   baseURL: config.birdeye.restUrl,
   headers: {
     'X-API-KEY': config.birdeye.apiKey,
-    'x-chain': 'solana',
+    'x-chain':   'solana',
   },
-  timeout: 10000,
+  timeout: 8000,
 });
 
+// ─────────────────────────────────────────────────────────────────
+
 /**
- * Get token overview: price, liquidity, FDV, etc.
+ * 获取代币概览：价格、LP、FDV 等
  */
 async function getTokenOverview(address) {
   try {
-    const res = await api.get('/defi/token_overview', {
-      params: { address },
-    });
-    const d = res.data?.data;
+    const res = await api.get('/defi/token_overview', { params: { address } });
+    const d   = res.data?.data;
     if (!d) return null;
     return {
-      price: d.price,
-      lp: d.liquidity,
-      fdv: d.fdv,
+      price:       d.price,
+      lp:          d.liquidity,
+      fdv:         d.fdv,
       priceChange: d.priceChange24hPercent,
-      symbol: d.symbol,
-      name: d.name,
+      symbol:      d.symbol,
+      name:        d.name,
     };
   } catch (e) {
     console.error('[BirdEye REST] getTokenOverview error:', e.message);
@@ -38,43 +38,36 @@ async function getTokenOverview(address) {
 }
 
 /**
- * Get OHLCV candles for a token (used for initial RSI seeding).
- * BirdEye minimum resolution is 1m; we fetch enough 1m bars to seed RSI(7).
- * @param {string} address
- * @param {number} limit  number of 1m bars to fetch
+ * 获取单个代币最新价格（轻量接口，用于 REST 兜底轮询）
+ * 使用 /defi/price 接口，比 token_overview 更轻、更快
  */
-async function getOHLCV(address, limit = 100) {
+async function getPrice(address) {
   try {
-    const now = Math.floor(Date.now() / 1000);
-    const from = now - limit * 60; // 1m bars
-    const res = await api.get('/defi/ohlcv', {
-      params: {
-        address,
-        type: '1m',
-        time_from: from,
-        time_to: now,
-      },
+    const res = await api.get('/defi/price', { params: { address } });
+    const val = res.data?.data?.value;
+    return val ? parseFloat(val) : null;
+  } catch (e) {
+    // 静默失败，兜底轮询允许偶尔失败
+    return null;
+  }
+}
+
+/**
+ * 获取历史 OHLCV（用于 RSI 预热）
+ * BirdEye REST 最小粒度 1m，取最近 limit 根
+ */
+async function getOHLCV(address, limit = 50) {
+  try {
+    const now  = Math.floor(Date.now() / 1000);
+    const from = now - limit * 60;
+    const res  = await api.get('/defi/ohlcv', {
+      params: { address, type: '1m', time_from: from, time_to: now },
     });
-    const items = res.data?.data?.items || [];
-    return items;
+    return res.data?.data?.items || [];
   } catch (e) {
     console.error('[BirdEye REST] getOHLCV error:', e.message);
     return [];
   }
 }
 
-/**
- * Get token security info (honeypot check, etc.)
- */
-async function getTokenSecurity(address) {
-  try {
-    const res = await api.get('/defi/token_security', {
-      params: { address },
-    });
-    return res.data?.data || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-module.exports = { getTokenOverview, getOHLCV, getTokenSecurity };
+module.exports = { getTokenOverview, getPrice, getOHLCV };
