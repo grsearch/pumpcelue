@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOL Monitor — 5s Strategy Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+:root {
+  --bg:#080c10; --bg2:#0d1117; --bg3:#131920;
+  --border:#1e2a35; --border2:#243040;
+  --accent:#00e5ff; --accent2:#00ff88;
+  --red:#ff3d5a; --yellow:#ffc107;
+  --text:#c8d6e0; --text2:#6b8090; --text3:#3d5060;
+  --buy:#00ff88; --sell:#ff3d5a;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Space Grotesk',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;min-height:100vh;overflow-x:hidden}
+
+/* HEADER */
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.logo{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--accent);letter-spacing:2px;text-transform:uppercase}
+.logo span{color:var(--accent2)}
+.status-bar{display:flex;gap:20px;align-items:center}
+.status-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text2)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text3)}
+.dot.green{background:var(--accent2);box-shadow:0 0 6px var(--accent2);animation:pulse 2s infinite}
+.dot.red{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* STATS */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.stat-card{background:var(--bg2);padding:12px 20px}
+.stat-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.stat-value{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent)}
+
+/* MAIN LAYOUT */
+.main{display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 97px)}
+
+/* TOKEN PANEL */
+.token-panel{overflow:auto;border-right:1px solid var(--border)}
+.panel-header{padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.token-count{background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:2px 10px;font-family:var(--mono);font-size:11px;color:var(--accent)}
+
+table{width:100%;border-collapse:collapse}
+thead th{padding:8px 12px;text-align:left;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:40px;white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border);transition:background .15s;cursor:pointer}
+tbody tr:hover{background:var(--bg3)}
+tbody tr.inactive{opacity:.4}
+td{padding:9px 12px;font-family:var(--mono);font-size:12px;white-space:nowrap}
+
+.symbol-cell{font-weight:700;font-size:13px;color:#fff}
+.symbol-cell .ticker{display:flex;align-items:center;gap:6px}
+.pos-dot{width:6px;height:6px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.pos-dot.open{background:var(--accent2);box-shadow:0 0 5px var(--accent2)}
+
+.age-cell{color:var(--text2)}
+.age-cell.warn{color:var(--yellow)}
+.age-cell.expire{color:var(--red)}
+
+.contract-link{color:var(--accent);text-decoration:none;font-size:10px;opacity:.7}
+.contract-link:hover{opacity:1;text-decoration:underline}
+
+.rsi-cell{font-weight:600}
+.rsi-cell.overbought{color:var(--red)}
+.rsi-cell.oversold{color:var(--accent2)}
+.rsi-cell.neutral{color:var(--text)}
+
+.pnl-cell.pos{color:var(--accent2)}
+.pnl-cell.neg{color:var(--red)}
+
+.badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;font-family:var(--mono)}
+.badge.active{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.3)}
+.badge.inactive{background:rgba(107,128,144,.15);color:var(--text3);border:1px solid var(--border)}
+
+.remove-btn{background:none;border:1px solid var(--border2);color:var(--text3);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:10px;font-family:var(--mono);transition:all .15s}
+.remove-btn:hover{border-color:var(--red);color:var(--red)}
+
+/* EMPTY STATE */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:var(--text3);text-align:center}
+.empty-state .icon{font-size:36px;margin-bottom:12px}
+.empty-state p{font-size:12px;line-height:1.6}
+.empty-state code{display:block;margin-top:16px;padding:12px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;font-family:var(--mono);font-size:10px;color:var(--accent2);text-align:left;word-break:break-all}
+
+/* SIGNAL PANEL */
+.signal-panel{display:flex;flex-direction:column;overflow:hidden}
+.signal-list{overflow-y:auto;flex:1}
+.signal-entry{padding:10px 14px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:60px 1fr;gap:8px;align-items:start}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.signal-entry.new{animation:slideIn .3s ease}
+.signal-type{display:flex;flex-direction:column;align-items:center;gap:4px}
+.signal-badge{padding:3px 8px;border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px}
+.signal-badge.BUY{background:rgba(0,255,136,.15);color:var(--buy);border:1px solid rgba(0,255,136,.3)}
+.signal-badge.SELL{background:rgba(255,61,90,.15);color:var(--sell);border:1px solid rgba(255,61,90,.3)}
+.signal-time{font-family:var(--mono);font-size:9px;color:var(--text3)}
+.signal-detail .sym{font-weight:700;color:#fff;font-size:13px;font-family:var(--mono)}
+.signal-detail .strategy{font-size:10px;color:var(--accent);font-family:var(--mono);margin-top:2px}
+.signal-detail .addr{font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:2px}
+
+@keyframes flashBuy{0%{background:rgba(0,255,136,.2)}100%{background:transparent}}
+@keyframes flashSell{0%{background:rgba(255,61,90,.2)}100%{background:transparent}}
+.flash-buy{animation:flashBuy .6s ease}
+.flash-sell{animation:flashSell .6s ease}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SOL<span>▲</span>MONITOR <span style="font-size:10px;color:var(--text3)">5s Strategy</span></div>
+  <div class="status-bar">
+    <div class="status-pill">
+      <div class="dot" id="ws-dot"></div>
+      <span id="ws-status">BirdEye WS: —</span>
+    </div>
+    <div class="status-pill">
+      <div class="dot green"></div>
+      <span>System Online</span>
+    </div>
+    <div class="status-pill">
+      <span id="clock" style="color:var(--accent);font-family:var(--mono)"></span>
+    </div>
+  </div>
+</header>
+
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-label">Active Tokens</div><div class="stat-value" id="stat-active">0</div></div>
+  <div class="stat-card"><div class="stat-label">Total Tracked</div><div class="stat-value" id="stat-total">0</div></div>
+  <div class="stat-card"><div class="stat-label">Signals Sent</div><div class="stat-value" id="stat-signals">0</div></div>
+  <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" style="font-size:14px;color:var(--text2)" id="stat-uptime">—</div></div>
+</div>
+
+<div class="main">
+  <!-- TOKEN TABLE -->
+  <div class="token-panel">
+    <div class="panel-header">
+      <span>Whitelist Monitor</span>
+      <span class="token-count" id="token-count">0 tokens</span>
+    </div>
+    <div id="token-table-wrap">
+      <div class="empty-state" id="empty-state">
+        <div class="icon">◎</div>
+        <p>No tokens in whitelist.<br>Send a token via webhook to start monitoring.</p>
+        <code>curl -X POST http://SERVER:3003/webhook/add-token \
+  -H "Content-Type: application/json" \
+  -d '{"network":"solana","address":"TOKEN_MINT","symbol":"TICKER"}'</code>
+      </div>
+      <table id="token-table" style="display:none">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Age</th><th>LP (USD)</th><th>FDV (USD)</th>
+            <th>Price</th><th>RSI(7)</th><th>Position</th><th>PnL</th>
+            <th>Contract</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="token-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SIGNAL LOG -->
+  <div class="signal-panel">
+    <div class="panel-header">
+      <span>Signal Log</span>
+      <span class="token-count" id="signal-count">0 signals</span>
+    </div>
+    <div class="signal-list" id="signal-list">
+      <div class="empty-state" id="signal-empty">
+        <div class="icon">⚡</div>
+        <p>No signals yet.<br>Signals appear here in real-time.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+let tokens = {};
+let signalCount = 0;
+let activeCount = 0;
+let totalCount  = 0;
+
+// ─── Socket events ────────────────────────────────────────────────
+socket.on('connect', fetchAll);
+
+socket.on('tokenAdded', (token) => {
+  tokens[token.address] = token;
+  renderTokens();
+  recalcCounts();
+});
+
+socket.on('tokenUpdated', (data) => {
+  if (!tokens[data.address]) return;
+  Object.assign(tokens[data.address], data);
+  updateTokenRow(data.address);
+  recalcCounts();
+});
+
+socket.on('tokenRemoved', ({ address }) => {
+  if (tokens[address]) { tokens[address].active = false; updateTokenRow(address); }
+  recalcCounts();
+});
+
+socket.on('signalLogged', (entry) => {
+  prependSignal(entry);
+  signalCount++;
+  document.getElementById('signal-count').textContent = signalCount + ' signals';
+  document.getElementById('stat-signals').textContent = signalCount;
+});
+
+// ─── Initial load ─────────────────────────────────────────────────
+async function fetchAll() {
+  try {
+    const [tokRes, sigRes, stRes] = await Promise.all([
+      fetch('/api/tokens').then(r => r.json()),
+      fetch('/api/signals?limit=100').then(r => r.json()),
+      fetch('/api/status').then(r => r.json()),
+    ]);
+
+    tokens = {};
+    (tokRes.data || []).forEach(t => { tokens[t.address] = t; });
+    renderTokens();
+
+    // Signal log
+    const sigList  = document.getElementById('signal-list');
+    const sigEmpty = document.getElementById('signal-empty');
+    const sigs = sigRes.data || [];
+    signalCount = sigs.length;
+    if (sigs.length > 0) {
+      sigEmpty.style.display = 'none';
+      // Remove existing entries but keep the empty state node
+      Array.from(sigList.children).forEach(c => { if (c !== sigEmpty) c.remove(); });
+      sigs.forEach(s => sigList.appendChild(buildSignalEl(s)));
+    } else {
+      sigEmpty.style.display = 'flex';
+    }
+    document.getElementById('signal-count').textContent = signalCount + ' signals';
+
+    updateStatus(stRes.data || {});
+    recalcCounts();
+  } catch (e) {
+    console.error('fetchAll error', e);
+  }
+}
+
+// ─── Status update ────────────────────────────────────────────────
+function updateStatus(data) {
+  document.getElementById('stat-signals').textContent = signalCount || (data.totalSignals ?? 0);
+  document.getElementById('stat-uptime').textContent  = fmtUptime(data.uptime ?? 0);
+  const wsDot    = document.getElementById('ws-dot');
+  const wsStatus = document.getElementById('ws-status');
+  if (data.wsConnected) {
+    wsDot.className   = 'dot green';
+    wsStatus.textContent = 'BirdEye WS: Live';
+  } else {
+    wsDot.className   = 'dot red';
+    wsStatus.textContent = 'BirdEye WS: Off';
+  }
+}
+
+function recalcCounts() {
+  activeCount = Object.values(tokens).filter(t => t.active).length;
+  totalCount  = Object.keys(tokens).length;
+  document.getElementById('stat-active').textContent = activeCount;
+  document.getElementById('stat-total').textContent  = totalCount;
+  document.getElementById('token-count').textContent = activeCount + ' tokens';
+}
+
+// Periodic status poll (only for uptime + ws state, not token counts)
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/status').then(r => r.json());
+    updateStatus(r.data || {});
+  } catch (_) {}
+}, 10000);
+
+// ─── Token table ──────────────────────────────────────────────────
+function renderTokens() {
+  const list    = Object.values(tokens);
+  const emptyEl = document.getElementById('empty-state');
+  const tableEl = document.getElementById('token-table');
+  const tbody   = document.getElementById('token-tbody');
+
+  if (list.length === 0) {
+    emptyEl.style.display = 'flex';
+    tableEl.style.display = 'none';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  tableEl.style.display = 'table';
+  tbody.innerHTML = '';
+  list.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+      .forEach(t => tbody.appendChild(buildTokenRow(t)));
+}
+
+function buildTokenRow(t) {
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + t.address;
+  if (!t.active) tr.classList.add('inactive');
+
+  const ageClass  = t.age >= 25 ? 'expire' : t.age >= 20 ? 'warn' : '';
+  const rsiVal    = t.rsi !== null && t.rsi !== undefined ? t.rsi : null;
+  const rsiClass  = rsiVal === null ? 'neutral' : rsiVal > 80 ? 'overbought' : rsiVal < 30 ? 'oversold' : 'neutral';
+  const gmgnUrl   = `https://gmgn.ai/sol/token/${t.address}`;
+  const shortAddr = t.address.length > 12 ? t.address.slice(0,6)+'...'+t.address.slice(-4) : t.address;
+  const pnl       = t.pnl || 0;
+  const pnlClass  = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '';
+  const pnlStr    = pnl !== 0 ? (pnl > 0 ? '+' : '') + pnl.toFixed(2) + '%' : '—';
+  const posLabel  = t.positionOpen
+    ? (t.isFirstPosition ? '● 1st' : '● Add')
+    : '○ —';
+  const posColor  = t.positionOpen ? 'var(--accent2)' : 'var(--text3)';
+
+  tr.innerHTML = `
+    <td class="symbol-cell">
+      <div class="ticker">
+        <div class="pos-dot ${t.positionOpen ? 'open' : ''}"></div>
+        ${escHtml(t.symbol)}
+      </div>
+    </td>
+    <td class="age-cell ${ageClass}">${t.age ?? 0}m</td>
+    <td>${fmtUsd(t.lp)}</td>
+    <td>${fmtUsd(t.fdv)}</td>
+    <td>${t.price ? '$' + fmtNum(t.price) : '—'}</td>
+    <td class="rsi-cell ${rsiClass}">${rsiVal !== null ? rsiVal.toFixed(1) : '—'}</td>
+    <td style="color:${posColor}">${posLabel}</td>
+    <td class="pnl-cell ${pnlClass}">${pnlStr}</td>
+    <td><a class="contract-link" href="${gmgnUrl}" target="_blank" title="${t.address}">${shortAddr}</a></td>
+    <td><span class="badge ${t.active ? 'active' : 'inactive'}">${t.active ? 'Active' : 'Expired'}</span></td>
+    <td>${t.active ? `<button class="remove-btn" onclick="removeToken('${t.address}')">✕</button>` : ''}</td>
+  `;
+  return tr;
+}
+
+function updateTokenRow(address) {
+  const t = tokens[address];
+  if (!t) return;
+  const existing = document.getElementById('row-' + address);
+  if (existing) existing.replaceWith(buildTokenRow(t));
+  else renderTokens(); // token was new and table might have been empty
+}
+
+async function removeToken(address) {
+  if (!confirm('Remove this token and send SELL signal?')) return;
+  try {
+    await fetch('/api/remove-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+  } catch (e) { console.error(e); }
+}
+
+// ─── Signal log ───────────────────────────────────────────────────
+function prependSignal(entry) {
+  const list     = document.getElementById('signal-list');
+  const sigEmpty = document.getElementById('signal-empty');
+  sigEmpty.style.display = 'none';
+  const el = buildSignalEl(entry);
+  el.classList.add('new', entry.type === 'BUY' ? 'flash-buy' : 'flash-sell');
+  list.insertBefore(el, sigEmpty.nextSibling);
+  // Cap DOM entries at 200
+  while (list.children.length > 201) list.removeChild(list.lastChild);
+}
+
+function buildSignalEl(entry) {
+  const el   = document.createElement('div');
+  el.className = 'signal-entry';
+  const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
+  const shortAddr = entry.address ? entry.address.slice(0,6)+'...'+entry.address.slice(-4) : '';
+  el.innerHTML = `
+    <div class="signal-type">
+      <span class="signal-badge ${entry.type}">${entry.type}</span>
+      <span class="signal-time">${time}</span>
+    </div>
+    <div class="signal-detail">
+      <div class="sym">${escHtml(entry.symbol)}</div>
+      <div class="strategy">${escHtml(entry.strategy)}</div>
+      <div class="addr">${shortAddr}</div>
+    </div>`;
+  return el;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+function fmtUsd(val) {
+  if (val == null) return '—';
+  if (val >= 1e9) return '$' + (val/1e9).toFixed(2) + 'B';
+  if (val >= 1e6) return '$' + (val/1e6).toFixed(2) + 'M';
+  if (val >= 1e3) return '$' + (val/1e3).toFixed(1) + 'K';
+  return '$' + val.toFixed(2);
+}
+function fmtNum(val) {
+  if (val == null) return '—';
+  if (val < 0.000001) return val.toExponential(3);
+  if (val < 1) return val.toFixed(6);
+  return val.toFixed(4);
+}
+function fmtUptime(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function escHtml(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Clock
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}, 1000);
+</script>
+</body>
+</html>
