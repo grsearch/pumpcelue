@@ -106,12 +106,16 @@ async function evaluateStrategy(address) {
     }
   }
 
-  // ── 加仓：RSI(7) 上穿 30 ─────────────────────────────────────────
-  // 无论首仓是否还在，均可触发；加仓后转为 RSI 卖出规则
-  if (prevRsi !== null && prevRsi < config.rsi.buyCross && rsi >= config.rsi.buyCross) {
+  // ── 新仓：RSI(7) 上穿 30，且当前无持仓 ────────────────────────────
+  // 规则：
+  //   1. 必须 positionOpen = false（无持仓才能开新仓，防止重复加仓）
+  //   2. RSI 从 30 以下上穿 30
+  //   3. 卖出后再次满足条件可重新开仓（无次数限制）
+  if (!token.positionOpen &&
+      prevRsi !== null && prevRsi < config.rsi.buyCross && rsi >= config.rsi.buyCross) {
     // 异步 await 期间检查 token 是否已被到期移除
     if (!token.active) return;
-    console.log(`[Strategy] BUY ADD (RSI cross↑${config.rsi.buyCross}): ${token.symbol} RSI=${rsi.toFixed(2)}`);
+    console.log(`[Strategy] BUY NEW (RSI cross↑${config.rsi.buyCross}): ${token.symbol} RSI=${rsi.toFixed(2)}`);
     await webhookSender.sendBuy(
       address, token.symbol,
       `RSI_CROSS_UP_${config.rsi.buyCross}`,
