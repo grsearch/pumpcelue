@@ -31,16 +31,16 @@ async function onTokenReceived({ address, symbol, network }) {
 
   // 1) 立即发送首仓 BUY 信号
   await webhookSender.sendBuy(address, symbol, 'FIRST_POSITION', null);
-  token.positionOpen            = true;
-  token.isFirstPosition         = true;
-  token.firstPositionEntryPrice = null;
-  token.additionCount           = 0;
+  token.positionOpen    = true;
+  token.isFirstPosition = true;  // 首仓：仅止盈卖出，RSI 卖出不生效
+  token.entryPrice      = null;  // 拉取元数据后填入
+  token.additionCount   = 0;
 
   // 2) 拉取初始元数据，将当前价格记为首仓入场价
   await refreshMetadata(address);
   const tok = tokenStore.getToken(address);
   if (tok && tok.price) {
-    tok.firstPositionEntryPrice = tok.price;
+    tok.entryPrice = tok.price;
     console.log(`[Monitor] Entry price: $${tok.price} for ${symbol}`);
   }
 
@@ -190,9 +190,15 @@ function startAgeTicker(address) {
     if (ageMs >= MAX_AGE_MS) {
       console.log(`[Monitor] Expired: ${token.symbol} (${token.age}m)`);
       clearInterval(interval);
+      // 首仓未平：发 SELL
       if (token.positionOpen) {
         await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
         token.positionOpen = false;
+      }
+      // 加仓未平：发 SELL（与首仓独立，可能都开着）
+      if (token.addPositionOpen) {
+        await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
+        token.addPositionOpen = false;
       }
       birdeyeWs.unsubscribe(address);
       tokenStore.removeToken(address);
