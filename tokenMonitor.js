@@ -85,9 +85,10 @@ async function seedHistoricalCloses(address) {
 
     if (closes.length > 0) {
       token.closes = closes;
+      // strategy.js 每次从 closes 直接计算 prevRsi，不依赖 token.rsi，
+      // 所以这里只需存入 closes 即可，无需预填 token.rsi
       console.log(
-        `[Monitor] Seeded ${closes.length} x 1m closes for ${token.symbol} ` +
-        `(RSI needs ${config.rsi.period + 2} min)`
+        `[Monitor] Seeded ${closes.length} x 1m closes for ${token.symbol}`
       );
       return;
     }
