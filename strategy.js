@@ -88,6 +88,12 @@ async function evaluateStrategy(address) {
         token.entryPrice      = null;
         token.pnl             = 0;
         token.sellCount++;
+        // 机器人收到 SELL 会全仓卖出，加仓也一并清除，否则系统进入僵死状态
+        if (token.addPositionOpen) {
+          token.addPositionOpen = false;
+          token.addEntryPrice   = null;
+          console.log(`[Strategy] Add position also cleared due to first pos TP sell: ${token.symbol}`);
+        }
         return;
       }
     }
@@ -117,6 +123,13 @@ async function evaluateStrategy(address) {
         token.addPositionOpen = false;
         token.addEntryPrice   = null;
         token.sellCount++;
+        // 机器人全仓卖出，首仓也一并清除
+        if (token.positionOpen) {
+          token.positionOpen    = false;
+          token.isFirstPosition = false;
+          token.entryPrice      = null;
+          token.pnl             = 0;
+        }
         return;
       }
     }
@@ -132,6 +145,13 @@ async function evaluateStrategy(address) {
       token.addPositionOpen = false;
       token.addEntryPrice   = null;
       token.sellCount++;
+      // 机器人全仓卖出，首仓也一并清除
+      if (token.positionOpen) {
+        token.positionOpen    = false;
+        token.isFirstPosition = false;
+        token.entryPrice      = null;
+        token.pnl             = 0;
+      }
       return;
     }
 
@@ -146,6 +166,13 @@ async function evaluateStrategy(address) {
       token.addPositionOpen = false;
       token.addEntryPrice   = null;
       token.sellCount++;
+      // 机器人全仓卖出，首仓也一并清除
+      if (token.positionOpen) {
+        token.positionOpen    = false;
+        token.isFirstPosition = false;
+        token.entryPrice      = null;
+        token.pnl             = 0;
+      }
       return;
     }
   }
