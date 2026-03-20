@@ -191,18 +191,18 @@ function startAgeTicker(address) {
     if (ageMs >= MAX_AGE_MS) {
       console.log(`[Monitor] Expired: ${token.symbol} (${token.age}m)`);
       clearInterval(interval);
-      // 首仓未平：发 SELL
+      // 先停止所有数据流和策略（防止 await 期间 restFallback 触发买入）
+      birdeyeWs.unsubscribe(address);
+      tokenStore.removeToken(address); // 立即设 active=false，阻断所有后续策略
+      // 再发 SELL 信号（active=false 后 evaluateStrategy 不会再运行）
       if (token.positionOpen) {
         await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
         token.positionOpen = false;
       }
-      // 加仓未平：发 SELL（与首仓独立，可能都开着）
       if (token.addPositionOpen) {
         await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
         token.addPositionOpen = false;
       }
-      birdeyeWs.unsubscribe(address);
-      tokenStore.removeToken(address);
       console.log(`[Monitor] Removed: ${token.symbol}`);
     }
   }, 1000);
