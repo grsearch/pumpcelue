@@ -83,18 +83,18 @@ app.post('/api/remove-token', async (req, res) => {
   const ws            = require('./birdeyeWs');
   const webhookSender = require('./webhookSender');
 
-  // 首仓未平：发 SELL
+  // 先停止数据流和策略，再发信号（防止 await 期间 restFallback 触发买入）
+  ws.unsubscribe(address);
+  tokenStore.removeToken(address); // 立即设 active=false，阻断所有策略
+  // 再发 SELL 信号
   if (token.positionOpen) {
     await webhookSender.sendSell(address, token.symbol, 'MANUAL_REMOVE', token.price);
     token.positionOpen = false;
   }
-  // 加仓未平：发 SELL
   if (token.addPositionOpen) {
     await webhookSender.sendSell(address, token.symbol, 'MANUAL_REMOVE', token.price);
     token.addPositionOpen = false;
   }
-  ws.unsubscribe(address);
-  tokenStore.removeToken(address);
   res.json({ success: true, message: `${token.symbol} removed` });
 });
 
