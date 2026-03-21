@@ -25,7 +25,7 @@ module.exports = {
   },
   rsi: {
     period:   parseInt(process.env.RSI_PERIOD)    || 7,
-    buyCross: parseFloat(process.env.RSI_BUY_CROSS) || 60,
+    buyCross: parseFloat(process.env.RSI_BUY_CROSS) || 30,
     tpPct:    parseFloat(process.env.TP_PCT)        || 50, // 止盈百分比
     slPct:    parseFloat(process.env.SL_PCT)        || 50,  // 止损百分比
   },
