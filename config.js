@@ -19,7 +19,7 @@ module.exports = {
     sellUrl: `http://${process.env.TRADE_BOT_HOST || 'localhost'}:${process.env.TRADE_BOT_PORT || 3002}/force-sell`,
   },
   monitor: {
-    tokenMaxAgeMinutes:    parseInt(process.env.TOKEN_MAX_AGE_MINUTES)    || 30,
+    tokenMaxAgeMinutes:    parseInt(process.env.TOKEN_MAX_AGE_MINUTES)    || 60,
     candleIntervalSeconds: parseInt(process.env.CANDLE_INTERVAL_SECONDS)  || 5,
     fdvMinimum:            parseFloat(process.env.FDV_MINIMUM)             || 10000,
   },
