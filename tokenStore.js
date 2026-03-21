@@ -31,12 +31,10 @@ class TokenStore extends EventEmitter {
       addPositionOpen: false,
       addEntryPrice:   null,
       additionCount:   0,
+      hasBought:       false, // 整个监控周期只买一次
       sellCount:       0,
       active:       true,
-      // 兼容旧字段（首仓逻辑已移除，保留避免其他模块报错）
-      positionOpen:    false,
-      isFirstPosition: false,
-      entryPrice:      null,
+
     };
     this.tokens.set(address, token);
     this.emit('tokenAdded', token);
