@@ -153,20 +153,24 @@ function startAgeTicker(address) {
       await refreshMetadata(address);
     }
 
-    // 到期处理：先停止再发信号
-    if (ageMs >= MAX_AGE_MS) {
-      console.log(`[Monitor] Expired: ${token.symbol} (${token.age}m)`);
+    // ── 退出条件 1：监控时长超过 30 分钟 ────────────────────────────
+    const ageExpired = ageMs >= MAX_AGE_MS;
+
+    // ── 退出条件 2：FDV 低于最小值（默认 10000 USD）────────────────
+    // FDV 过低说明市值已大幅萎缩，继续持有意义不大
+    const fdvTooLow = token.fdv !== null && token.fdv < config.monitor.fdvMinimum;
+
+    if (ageExpired || fdvTooLow) {
+      const reason = ageExpired ? `AGE_EXPIRE (${token.age}m)` : `FDV_TOO_LOW (${token.fdv?.toFixed(0)})`;
+      console.log(`[Monitor] Exit: ${token.symbol} — ${reason}`);
       clearInterval(interval);
       birdeyeWs.unsubscribe(address);
       tokenStore.removeToken(address); // 立即 active=false，阻断策略
       // 有持仓则发 SELL
       if (token.addPositionOpen) {
-        await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
+        const strategy = ageExpired ? 'AGE_EXPIRE' : 'FDV_TOO_LOW';
+        await webhookSender.sendSell(address, token.symbol, strategy, token.price);
         token.addPositionOpen = false;
-      }
-      if (token.positionOpen) {
-        await webhookSender.sendSell(address, token.symbol, 'AGE_EXPIRE', token.price);
-        token.positionOpen = false;
       }
       console.log(`[Monitor] Removed: ${token.symbol}`);
     }
