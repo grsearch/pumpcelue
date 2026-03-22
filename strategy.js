@@ -2,17 +2,13 @@
 // RSI(7) 交易策略
 //
 // 买入：RSI(7) 上穿 30（prevRsi<30 且 rsi>=30）
-//       无持仓时触发，卖出后可再次买入（监控期内不限次数）
+//       监控期内只买一次（hasBought=true 后不再触发）
 //
-// 卖出（持仓中任一条件触发）：
-//   1. K线 high 相对入场价 +50%  → 止盈
-//   2. RSI 下穿 70               → 卖出
-//   3. RSI > 80                  → 卖出
-//   4. K线 low  相对入场价 -50%  → 止损
+// 卖出：K线 high 相对入场价 +50% → 止盈
 //
-// 白名单退出（由 tokenMonitor 负责，不在此处理）：
-//   - 监控满 60 分钟
-//   - LP < 10000
+// 白名单退出（由 tokenMonitor 负责）：
+//   - 监控满 60 分钟 → AGE_EXPIRE
+//   - FDV < 10000   → FDV_TOO_LOW
 
 const { RSI }       = require('technicalindicators');
 const config        = require('./config');
@@ -48,12 +44,10 @@ async function evaluateStrategy(address, candle) {
 
   const price = token.price || closes[closes.length - 1];
   const high  = (candle && candle.high) ? candle.high : price;
-  const low   = (candle && candle.low)  ? candle.low  : price;
 
-  // ── 持仓中：检查卖出条件 ─────────────────────────────────────────
+  // ── 持仓中：+50% 止盈 ────────────────────────────────────────────
   if (token.addPositionOpen) {
 
-    // 入场价兜底
     if (!token.addEntryPrice && price) {
       token.addEntryPrice = price;
       console.log(`[Strategy] Entry price set: $${price} for ${token.symbol}`);
@@ -61,41 +55,16 @@ async function evaluateStrategy(address, candle) {
 
     if (token.addEntryPrice) {
       const tpPrice = token.addEntryPrice * (1 + config.rsi.tpPct / 100);
-      const slPrice = token.addEntryPrice * (1 - config.rsi.slPct / 100);
 
-      // 卖出条件 1：+50% 止盈（用 high 判断）
+      // 用 high 判断止盈，避免漏掉 K 线内瞬间触及止盈价
       if (high >= tpPrice) {
-        const exitPrice = tpPrice;
-        const gainPct   = ((exitPrice - token.addEntryPrice) / token.addEntryPrice * 100).toFixed(1);
+        const gainPct = ((tpPrice - token.addEntryPrice) / token.addEntryPrice * 100).toFixed(1);
         console.log(`[Strategy] SELL TP +${gainPct}%: ${token.symbol} entry=$${token.addEntryPrice} high=$${high}`);
-        await webhookSender.sendSell(address, token.symbol, `TP_+${config.rsi.tpPct}%`, exitPrice);
-        _clearPosition(token);
-        return;
-      }
-
-      // 卖出条件 2：RSI > 80
-      if (rsi > config.rsi.sellHigh) {
-        console.log(`[Strategy] SELL RSI>${config.rsi.sellHigh}: ${token.symbol} RSI=${rsi.toFixed(2)}`);
-        await webhookSender.sendSell(address, token.symbol, `RSI_ABOVE_${config.rsi.sellHigh}`, price);
-        _clearPosition(token);
-        return;
-      }
-
-      // 卖出条件 3：RSI 下穿 70
-      if (prevRsi >= config.rsi.sellCross && rsi < config.rsi.sellCross) {
-        console.log(`[Strategy] SELL RSI cross↓${config.rsi.sellCross}: ${token.symbol} RSI=${rsi.toFixed(2)}`);
-        await webhookSender.sendSell(address, token.symbol, `RSI_CROSS_DOWN_${config.rsi.sellCross}`, price);
-        _clearPosition(token);
-        return;
-      }
-
-      // 卖出条件 4：-50% 止损（用 low 判断）
-      if (low <= slPrice) {
-        const exitPrice = slPrice;
-        const lossPct   = ((exitPrice - token.addEntryPrice) / token.addEntryPrice * 100).toFixed(1);
-        console.log(`[Strategy] SELL SL ${lossPct}%: ${token.symbol} entry=$${token.addEntryPrice} low=$${low}`);
-        await webhookSender.sendSell(address, token.symbol, `SL_-${config.rsi.slPct}%`, exitPrice);
-        _clearPosition(token);
+        await webhookSender.sendSell(address, token.symbol, `TP_+${config.rsi.tpPct}%`, tpPrice);
+        token.addPositionOpen = false;
+        token.addEntryPrice   = null;
+        token.pnl             = 0;
+        token.sellCount++;
         return;
       }
 
@@ -104,9 +73,8 @@ async function evaluateStrategy(address, candle) {
     }
   }
 
-  // ── 无持仓：RSI 上穿 30 → 买入 ───────────────────────────────────
-  // 卖出后允许再次买入，监控期内不限次数（无 hasBought 限制）
-  if (!token.addPositionOpen &&
+  // ── 无持仓且未买过：RSI 上穿 30 → 买入 ──────────────────────────
+  if (!token.addPositionOpen && !token.hasBought &&
       prevRsi < config.rsi.buyCross &&
       rsi >= config.rsi.buyCross) {
     if (!token.active) return;
@@ -114,16 +82,10 @@ async function evaluateStrategy(address, candle) {
     await webhookSender.sendBuy(address, token.symbol, `RSI_CROSS_UP_${config.rsi.buyCross}`, price);
     token.addPositionOpen = true;
     token.addEntryPrice   = price;
+    token.hasBought       = true;
     token.pnl             = 0;
     token.additionCount++;
   }
-}
-
-function _clearPosition(token) {
-  token.addPositionOpen = false;
-  token.addEntryPrice   = null;
-  token.pnl             = 0;
-  token.sellCount++;
 }
 
 module.exports = { calcRSI, evaluateStrategy };
