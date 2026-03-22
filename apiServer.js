@@ -29,7 +29,6 @@ app.post('/webhook/add-token', async (req, res) => {
   }
 
   try {
-    // 先占位防重复，再异步处理
     tokenStore.addToken(address, symbol, network);
     res.status(202).json({ success: true, message: 'Token queued for monitoring', address, symbol });
     await onTokenReceived({ address, symbol, network });
@@ -75,13 +74,17 @@ app.post('/api/remove-token', async (req, res) => {
   const ws            = require('./birdeyeWs');
   const webhookSender = require('./webhookSender');
 
-  // 先停止再发信号，防止 await 期间 restFallback 触发买入
   ws.unsubscribe(address);
   tokenStore.removeToken(address);
 
-  if (token.addPositionOpen) {
+  // [FIX] 同时检查首仓(positionOpen)和加仓(addPositionOpen)
+  if (token.positionOpen || token.addPositionOpen) {
     await webhookSender.sendSell(address, token.symbol, 'MANUAL_REMOVE', token.price);
+    token.positionOpen    = false;
+    token.isFirstPosition = false;
+    token.entryPrice      = null;
     token.addPositionOpen = false;
+    token.addEntryPrice   = null;
   }
 
   res.json({ success: true, message: `${token.symbol} removed` });
@@ -98,6 +101,10 @@ tokenStore.on('tokenUpdated', (token) => io.emit('tokenUpdated', {
   rsi:             token.rsi !== null ? parseFloat(token.rsi.toFixed(2)) : null,
   age:             token.age,
   pnl:             token.pnl,
+  // [FIX] 补全首仓相关字段
+  positionOpen:    token.positionOpen,
+  isFirstPosition: token.isFirstPosition,
+  entryPrice:      token.entryPrice,
   addPositionOpen: token.addPositionOpen,
   addEntryPrice:   token.addEntryPrice,
   hasBought:       token.hasBought,
@@ -119,9 +126,12 @@ function _safeToken(t) {
     priceChange:     t.priceChange,
     pnl:             t.pnl,
     rsi:             t.rsi !== null && t.rsi !== undefined ? parseFloat(t.rsi.toFixed(2)) : null,
+    // [FIX] 补全首仓相关字段，与 tokenStore 保持一致
+    positionOpen:    t.positionOpen,
+    isFirstPosition: t.isFirstPosition,
+    entryPrice:      t.entryPrice,
     addPositionOpen: t.addPositionOpen,
     addEntryPrice:   t.addEntryPrice,
-    hasBought:       t.hasBought,
     additionCount:   t.additionCount,
     sellCount:       t.sellCount,
     active:          t.active,
