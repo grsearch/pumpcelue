@@ -1,207 +1,147 @@
-// src/tokenMonitor.js
-// 代币生命周期管理
-//
-// 双轨价格驱动：
-//   主轨：BirdEye WS 成交流 → 实时聚合 5s K 线
-//   备轨：每 5s REST 轮询 → WS 静默时生成兜底 K 线
-
-const tokenStore    = require('./tokenStore');
-const birdeyeWs     = require('./birdeyeWs');
-const { getTokenOverview, getOHLCV, getPrice } = require('./birdeyeRest');
-const { evaluateStrategy }                     = require('./strategy');
-const webhookSender = require('./webhookSender');
+// src/apiServer.js
+const express  = require('express');
+const cors     = require('cors');
+const { createServer }     = require('http');
+const { Server: SocketIO } = require('socket.io');
 const config        = require('./config');
+const tokenStore    = require('./tokenStore');
+const { onTokenReceived } = require('./tokenMonitor');
 
-const MAX_AGE_MS = config.monitor.tokenMaxAgeMinutes * 60 * 1000;
-const CANDLE_SEC = config.monitor.candleIntervalSeconds;
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
 
-// ─────────────────────────────────────────────────────────────────
-// 收到新代币
-// ─────────────────────────────────────────────────────────────────
+const httpServer = createServer(app);
+const io = new SocketIO(httpServer, { cors: { origin: '*' } });
 
-async function onTokenReceived({ address, symbol, network }) {
-  console.log(`[Monitor] New token: ${symbol} (${address})`);
+// ── POST /webhook/add-token ───────────────────────────────────────
+app.post('/webhook/add-token', async (req, res) => {
+  const { address, symbol, network = 'solana' } = req.body;
 
-  // 加入白名单（tokenStore.addToken 有内置去重）
-  tokenStore.addToken(address, symbol, network);
-
-  // 1) 立即发送首仓 BUY 信号
-  await webhookSender.sendBuy(address, symbol, 'FIRST_POSITION', null);
-  const tok0 = tokenStore.getToken(address);
-  if (tok0) {
-    tok0.positionOpen    = true;
-    tok0.isFirstPosition = true;
-    tok0.entryPrice      = null; // 拉取元数据后填入
+  if (!address || !symbol) {
+    return res.status(400).json({ success: false, error: 'address and symbol are required' });
   }
 
-  // 2) 拉取初始元数据，记录首仓入场价
-  await refreshMetadata(address);
-  const tok1 = tokenStore.getToken(address);
-  if (tok1 && tok1.price) {
-    tok1.entryPrice = tok1.price;
-    console.log(`[Monitor] First pos entry price: $${tok1.price} for ${symbol}`);
+  const existing = tokenStore.getToken(address);
+  if (existing && existing.active) {
+    return res.json({ success: true, message: 'Already in whitelist', token: _safeToken(existing) });
   }
 
-  // 预热历史 closes（缩短 RSI 冷启动时间）
-  await seedHistoricalCloses(address);
-
-  // 订阅 WS 成交流（主轨）
-  birdeyeWs.subscribe(address);
-
-  // 启动 REST 兜底轮询（备轨）
-  startRestFallback(address);
-
-  // 启动年龄计时器
-  startAgeTicker(address);
-
-  console.log(`[Monitor] ${symbol} is now being monitored. Waiting for RSI cross↑${config.rsi.buyCross} to buy.`);
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 元数据 & RSI 预热
-// ─────────────────────────────────────────────────────────────────
-
-async function refreshMetadata(address) {
-  const overview = await getTokenOverview(address);
-  if (overview) {
-    tokenStore.updateTokenData(address, {
-      lp:          overview.lp,
-      fdv:         overview.fdv,
-      price:       overview.price,
-      priceChange: overview.priceChange,
-    });
-  }
-}
-
-async function seedHistoricalCloses(address) {
-  const candles = await getOHLCV(address, 50);
-  const token   = tokenStore.getToken(address);
-  if (!token) return;
-
-  if (candles && candles.length > 0) {
-    const closes = candles
-      .map(c => c.c ?? c.close ?? null)
-      .filter(v => v !== null && v > 0);
-
-    if (closes.length > 0) {
-      token.closes = closes;
-      console.log(`[Monitor] Seeded ${closes.length} x 1m closes for ${token.symbol}`);
-      return;
-    }
-  }
-  console.log(`[Monitor] No history for ${token.symbol} — RSI warms up from live data`);
-}
-
-// ─────────────────────────────────────────────────────────────────
-// REST 兜底轮询（备轨）
-// ─────────────────────────────────────────────────────────────────
-
-function startRestFallback(address) {
-  let lastFallbackWindow = -1;
-
-  const timer = setInterval(async () => {
-    const token = tokenStore.getToken(address);
-    if (!token || !token.active) {
-      clearInterval(timer);
-      return;
-    }
-
-    const now         = Math.floor(Date.now() / 1000);
-    const windowStart = Math.floor(now / CANDLE_SEC) * CANDLE_SEC;
-
-    if (token._candleWindow && token._candleWindow.windowStart === windowStart) return;
-    if (lastFallbackWindow === windowStart) return;
-
-    const price = await getPrice(address);
-    if (!price || price <= 0) return;
-
-    if (token._candleWindow && token._candleWindow.windowStart === windowStart) return;
-    if (!token.active) return;
-
-    tokenStore.updateTokenData(address, { price });
-
-    const candle = {
-      time:       windowStart,
-      open:       price,
-      high:       price,
-      low:        price,
-      close:      price,
-      volume:     0,
-      trades:     0,
-      isFallback: true,
-    };
-
-    token.candles.push(candle);
-    if (token.candles.length > 500) token.candles.shift();
-
-    tokenStore.pushClose(address, price);
-    tokenStore.emit('newCandle', { address, candle, token });
-
-    lastFallbackWindow = windowStart;
-    console.log(`[Fallback] ${token.symbol} @ $${price.toFixed(8)}`);
-
-  }, CANDLE_SEC * 1000);
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 年龄计时器 & 到期退出
-// ─────────────────────────────────────────────────────────────────
-
-function startAgeTicker(address) {
-  let lastMetaRefresh = Date.now();
-
-  const interval = setInterval(async () => {
-    const token = tokenStore.getToken(address);
-    if (!token || !token.active) {
-      clearInterval(interval);
-      return;
-    }
-
-    const now   = Date.now();
-    const ageMs = now - token.addedAt;
-    token.age   = Math.floor(ageMs / 60000);
-
-    // 每 30s 刷新元数据
-    if (now - lastMetaRefresh >= 30000) {
-      lastMetaRefresh = now;
-      await refreshMetadata(address);
-    }
-
-    // ── 退出条件 1：监控时长超过 30 分钟 ────────────────────────────
-    const ageExpired = ageMs >= MAX_AGE_MS;
-
-    // ── 退出条件 2：FDV 低于最小值（默认 10000 USD）────────────────
-    // FDV 过低说明市喀已大幅萎缩，继续持有意义不大
-    const fdvTooLow = token.fdv !== null && token.fdv < config.monitor.fdvMinimum;
-
-    if (ageExpired || fdvTooLow) {
-      const reason = ageExpired ? `AGE_EXPIRE (${token.age}m)` : `FDV_TOO_LOW (${token.fdv?.toFixed(0)})`;
-      console.log(`[Monitor] Exit: ${token.symbol} — ${reason}`);
-      clearInterval(interval);
-      birdeyeWs.unsubscribe(address);
-      tokenStore.removeToken(address); // 立即 active=false，阻断策略
-      // 有持仓则发 SELL
-      if (token.addPositionOpen) {
-        const strategy = ageExpired ? 'AGE_EXPIRE' : 'FDV_TOO_LOW';
-        await webhookSender.sendSell(address, token.symbol, strategy, token.price);
-        token.addPositionOpen = false;
-      }
-      console.log(`[Monitor] Removed: ${token.symbol}`);
-    }
-  }, 1000);
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 新蜡烛 → 策略（传入 candle 对象供策略使用 high/low）
-// ─────────────────────────────────────────────────────────────────
-
-tokenStore.on('newCandle', async ({ address, candle, token }) => {
-  if (!token.active) return;
   try {
-    await evaluateStrategy(address, candle);
-  } catch (err) {
-    console.error(`[Monitor] Strategy error for ${token.symbol}:`, err.message);
+    // 先占位防重复，再异步处理
+    tokenStore.addToken(address, symbol, network);
+    res.status(202).json({ success: true, message: 'Token queued for monitoring', address, symbol });
+    await onTokenReceived({ address, symbol, network });
+  } catch (e) {
+    console.error('[API] onTokenReceived error:', e.message);
   }
 });
 
-module.exports = { onTokenReceived, refreshMetadata };
+// ── GET /api/tokens ───────────────────────────────────────────────
+app.get('/api/tokens', (req, res) => {
+  res.json({ success: true, data: tokenStore.getAllTokens().map(_safeToken) });
+});
+
+// ── GET /api/signals ──────────────────────────────────────────────
+app.get('/api/signals', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  res.json({ success: true, data: tokenStore.getSignalLog(limit) });
+});
+
+// ── GET /api/status ───────────────────────────────────────────────
+app.get('/api/status', (req, res) => {
+  const ws = require('./birdeyeWs');
+  res.json({
+    success: true,
+    data: {
+      activeTokens: tokenStore.getActiveTokens().length,
+      totalTokens:  tokenStore.getAllTokens().length,
+      totalSignals: tokenStore.signalLog.length,
+      wsConnected:  ws.connected,
+      uptime:       Math.floor(process.uptime()),
+    },
+  });
+});
+
+// ── POST /api/remove-token ────────────────────────────────────────
+app.post('/api/remove-token', async (req, res) => {
+  const { address } = req.body;
+  if (!address) return res.status(400).json({ success: false, error: 'address required' });
+
+  const token = tokenStore.getToken(address);
+  if (!token) return res.status(404).json({ success: false, error: 'Token not found' });
+
+  const ws            = require('./birdeyeWs');
+  const webhookSender = require('./webhookSender');
+
+  // 先停止再发信号，防止 await 期间 restFallback 触发买入
+  ws.unsubscribe(address);
+  tokenStore.removeToken(address);
+
+  if (token.positionOpen || token.addPositionOpen) {
+    await webhookSender.sendSell(address, token.symbol, 'MANUAL_REMOVE', token.price);
+    token.positionOpen    = false;
+    token.isFirstPosition = false;
+    token.entryPrice      = null;
+    token.addPositionOpen = false;
+    token.addEntryPrice   = null;
+  }
+
+  res.json({ success: true, message: `${token.symbol} removed` });
+});
+
+// ── Socket.IO ─────────────────────────────────────────────────────
+tokenStore.on('tokenAdded',   (token) => io.emit('tokenAdded', _safeToken(token)));
+tokenStore.on('tokenUpdated', (token) => io.emit('tokenUpdated', {
+  address:         token.address,
+  symbol:          token.symbol,
+  price:           token.price,
+  lp:              token.lp,
+  fdv:             token.fdv,
+  rsi:             token.rsi !== null ? parseFloat(token.rsi.toFixed(2)) : null,
+  age:             token.age,
+  pnl:             token.pnl,
+  positionOpen:    token.positionOpen,
+  isFirstPosition: token.isFirstPosition,
+  entryPrice:      token.entryPrice,
+  addPositionOpen: token.addPositionOpen,
+  addEntryPrice:   token.addEntryPrice,
+  active:          token.active,
+}));
+tokenStore.on('tokenRemoved', (token) => io.emit('tokenRemoved', { address: token.address }));
+tokenStore.on('signalLogged', (entry) => io.emit('signalLogged', entry));
+tokenStore.on('newCandle',    ({ address, candle }) => io.emit('newCandle', { address, candle }));
+
+// ── Helper ────────────────────────────────────────────────────────
+function _safeToken(t) {
+  return {
+    address:         t.address,
+    symbol:          t.symbol,
+    age:             t.age,
+    lp:              t.lp,
+    fdv:             t.fdv,
+    price:           t.price,
+    priceChange:     t.priceChange,
+    pnl:             t.pnl,
+    rsi:             t.rsi !== null && t.rsi !== undefined ? parseFloat(t.rsi.toFixed(2)) : null,
+    positionOpen:    t.positionOpen,
+    isFirstPosition: t.isFirstPosition,
+    entryPrice:      t.entryPrice,
+    addPositionOpen: t.addPositionOpen,
+    addEntryPrice:   t.addEntryPrice,
+      additionCount:   t.additionCount,
+    sellCount:       t.sellCount,
+    active:          t.active,
+    addedAt:         t.addedAt,
+    candles:         t.candles.slice(-60),
+  };
+}
+
+function startApiServer() {
+  httpServer.listen(config.server.port, '0.0.0.0', () => {
+    console.log(`[API] Listening on port ${config.server.port}`);
+  });
+}
+
+module.exports = { startApiServer, io };
