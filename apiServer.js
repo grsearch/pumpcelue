@@ -77,14 +77,12 @@ app.post('/api/remove-token', async (req, res) => {
   ws.unsubscribe(address);
   tokenStore.removeToken(address);
 
-  // [FIX] 同时检查首仓(positionOpen)和加仓(addPositionOpen)
-  if (token.positionOpen || token.addPositionOpen) {
+  if (token.positionOpen) {
     await webhookSender.sendSell(address, token.symbol, 'MANUAL_REMOVE', token.price);
     token.positionOpen    = false;
     token.isFirstPosition = false;
     token.entryPrice      = null;
-    token.addPositionOpen = false;
-    token.addEntryPrice   = null;
+    token.pnl             = 0;
   }
 
   res.json({ success: true, message: `${token.symbol} removed` });
@@ -98,16 +96,12 @@ tokenStore.on('tokenUpdated', (token) => io.emit('tokenUpdated', {
   price:           token.price,
   lp:              token.lp,
   fdv:             token.fdv,
-  rsi:             token.rsi !== null ? parseFloat(token.rsi.toFixed(2)) : null,
+  rsi:             null,   // 纯首仓策略不计算 RSI
   age:             token.age,
   pnl:             token.pnl,
-  // [FIX] 补全首仓相关字段
   positionOpen:    token.positionOpen,
   isFirstPosition: token.isFirstPosition,
   entryPrice:      token.entryPrice,
-  addPositionOpen: token.addPositionOpen,
-  addEntryPrice:   token.addEntryPrice,
-  hasBought:       token.hasBought,
   active:          token.active,
 }));
 tokenStore.on('tokenRemoved', (token) => io.emit('tokenRemoved', { address: token.address }));
@@ -125,14 +119,10 @@ function _safeToken(t) {
     price:           t.price,
     priceChange:     t.priceChange,
     pnl:             t.pnl,
-    rsi:             t.rsi !== null && t.rsi !== undefined ? parseFloat(t.rsi.toFixed(2)) : null,
-    // [FIX] 补全首仓相关字段，与 tokenStore 保持一致
+    rsi:             null,
     positionOpen:    t.positionOpen,
     isFirstPosition: t.isFirstPosition,
     entryPrice:      t.entryPrice,
-    addPositionOpen: t.addPositionOpen,
-    addEntryPrice:   t.addEntryPrice,
-    additionCount:   t.additionCount,
     sellCount:       t.sellCount,
     active:          t.active,
     addedAt:         t.addedAt,
