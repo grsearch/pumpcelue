@@ -145,6 +145,10 @@ class BirdeyeWsManager {
       // 更新最新价
       tokenStore.updateTokenData(address, { price });
 
+      // 实时止盈检查：每笔成交都检查是否触及止盈价
+      // 避免价格在 K线内冲高后回落导致 K线封口时漏掉止盈
+      this._checkTakeProfit(address, price);
+
       // 聚合进 5s 窗口
       this._accumulateTrade(address, price, volume, ts);
 
@@ -228,6 +232,46 @@ class BirdeyeWsManager {
 
     // ── 迟到成交（ts 属于已封口的旧窗口）：丢弃 ─────────────────
     // 链上确认延迟极少超过 5s，正常情况不触发
+  }
+
+  /**
+   * 每笔成交实时检查止盈
+   * 避免价格在 5s K 线内冲高再回落，K 线封口时漏掉止盈
+   */
+  _checkTakeProfit(address, price) {
+    const token = tokenStore.getToken(address);
+    if (!token || !token.active) return;
+
+    const config = require('./config');
+    const tpPct  = config.rsi.tpPct / 100;
+
+    // 首仓止盈检查
+    if (token.positionOpen && token.isFirstPosition && token.entryPrice) {
+      if (price >= token.entryPrice * (1 + tpPct)) {
+        const tpPrice = token.entryPrice * (1 + tpPct);
+        const webhookSender = require('./webhookSender');
+        console.log(`[WS-TP] SELL first pos TP: ${token.symbol} price=$${price}`);
+        webhookSender.sendSell(address, token.symbol, `TP_+${config.rsi.tpPct}%`, tpPrice).then(() => {
+          token.positionOpen = false; token.isFirstPosition = false; token.entryPrice = null;
+          token.addPositionOpen = false; token.addEntryPrice = null;
+          token.pnl = 0; token.additionCount = 0; token.sellCount++;
+        });
+      }
+    }
+
+    // 加仓止盈检查
+    if (token.addPositionOpen && token.addEntryPrice) {
+      if (price >= token.addEntryPrice * (1 + tpPct)) {
+        const tpPrice = token.addEntryPrice * (1 + tpPct);
+        const webhookSender = require('./webhookSender');
+        console.log(`[WS-TP] SELL add pos TP: ${token.symbol} price=$${price}`);
+        webhookSender.sendSell(address, token.symbol, `TP_+${config.rsi.tpPct}%`, tpPrice).then(() => {
+          token.positionOpen = false; token.isFirstPosition = false; token.entryPrice = null;
+          token.addPositionOpen = false; token.addEntryPrice = null;
+          token.pnl = 0; token.additionCount = 0; token.sellCount++;
+        });
+      }
+    }
   }
 }
 
