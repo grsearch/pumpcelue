@@ -29,7 +29,8 @@ module.exports = {
     sellHigh:  parseFloat(process.env.RSI_SELL_HIGH) || 80,  // RSI > 80 卖出
     sellCross: parseFloat(process.env.RSI_SELL_CROSS)|| 70,  // RSI 下穿 70 卖出
     tpPct:        parseFloat(process.env.TP_PCT)           || 50,  // 止盈百分比
-    reAddDropPct: parseFloat(process.env.RE_ADD_DROP_PCT)     || 20,  // 再次加仓所需跌幅
+    reAddDropPct:    parseFloat(process.env.RE_ADD_DROP_PCT)     || 20,   // 再次加仓所需跌幅
+    emaFilterRatio:  parseFloat(process.env.EMA_FILTER_RATIO)     || 0.97, // 加仓时 EMA9 >= EMA20 × 此值
     slPct:     parseFloat(process.env.SL_PCT)        || 50,  // 止损百分比
   },
 };
