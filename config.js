@@ -24,12 +24,11 @@ module.exports = {
     fdvMinimum:            parseFloat(process.env.FDV_MINIMUM)            || 10000,
   },
   rsi: {
-    period:    parseInt(process.env.RSI_PERIOD)      || 7,
-    buyCross:  parseFloat(process.env.RSI_BUY_CROSS) || 30,  // 上穿买入
-    sellHigh:  parseFloat(process.env.RSI_SELL_HIGH) || 80,  // RSI > 80 卖出
-    sellCross: parseFloat(process.env.RSI_SELL_CROSS)|| 70,  // RSI 下穿 70 卖出
-    tpPct:        parseFloat(process.env.TP_PCT)           || 150,  // 止盈百分比
-    reAddDropPct:    parseFloat(process.env.RE_ADD_DROP_PCT)     || 20,   // 再次加仓所需跌幅
-    slPct:     parseFloat(process.env.SL_PCT)        || 50,  // 止损百分比
+    period:    parseInt(process.env.RSI_PERIOD)       || 7,
+    buyCross:  parseFloat(process.env.RSI_BUY_CROSS)  || 30,
+    sellHigh:  parseFloat(process.env.RSI_SELL_HIGH)  || 80,
+    sellCross: parseFloat(process.env.RSI_SELL_CROSS) || 70,
+    tpPct:     parseFloat(process.env.TP_PCT)         || 150,
+    slPct:     parseFloat(process.env.SL_PCT)         || 50,
   },
 };

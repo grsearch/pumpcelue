@@ -74,7 +74,6 @@ app.post('/api/remove-token', async (req, res) => {
   const { _removeCandleHandlerExternal } = require('./tokenMonitor');
   const webhookSender = require('./webhookSender');
 
-  // 注销 candle 监听器 → 停止 WS → 移除 token → 发 SELL
   if (_removeCandleHandlerExternal) _removeCandleHandlerExternal(address);
   ws.unsubscribe(address);
   tokenStore.removeToken(address);
@@ -98,8 +97,8 @@ tokenStore.on('tokenUpdated', (t) => io.emit('tokenUpdated', {
   price:           t.price,
   lp:              t.lp,
   fdv:             t.fdv,
-  ema9:            t.ema9  !== null && t.ema9  !== undefined ? parseFloat(t.ema9.toFixed(8))  : null,
-  ema20:           t.ema20 !== null && t.ema20 !== undefined ? parseFloat(t.ema20.toFixed(8)) : null,
+  ema9:            t.ema9  != null ? parseFloat(t.ema9.toFixed(8))  : null,
+  ema20:           t.ema20 != null ? parseFloat(t.ema20.toFixed(8)) : null,
   age:             t.age,
   pnl:             t.pnl,
   hasBought:       t.hasBought,
@@ -110,7 +109,6 @@ tokenStore.on('tokenUpdated', (t) => io.emit('tokenUpdated', {
 }));
 tokenStore.on('tokenRemoved', (t) => io.emit('tokenRemoved', { address: t.address }));
 tokenStore.on('signalLogged', (e) => io.emit('signalLogged', e));
-tokenStore.on('newCandle',    ({ address, candle }) => io.emit('newCandle', { address, candle }));
 
 // ── Helper ────────────────────────────────────────────────────────
 function _safeToken(t) {
@@ -123,8 +121,8 @@ function _safeToken(t) {
     price:           t.price,
     priceChange:     t.priceChange,
     pnl:             t.pnl,
-    ema9:            t.ema9  !== null && t.ema9  !== undefined ? parseFloat(t.ema9.toFixed(8))  : null,
-    ema20:           t.ema20 !== null && t.ema20 !== undefined ? parseFloat(t.ema20.toFixed(8)) : null,
+    ema9:            t.ema9  != null ? parseFloat(t.ema9.toFixed(8))  : null,
+    ema20:           t.ema20 != null ? parseFloat(t.ema20.toFixed(8)) : null,
     hasBought:       t.hasBought,
     positionOpen:    t.positionOpen,
     isFirstPosition: t.isFirstPosition,

@@ -1,5 +1,5 @@
 // src/strategy.js
-// 策略：收录即买，EMA9 下穿 EMA20 且 EMA20 走平或下行时卖出
+// 策略：EMA9 下穿 EMA20 且 EMA20 走平或下行时卖出（死叉策略）
 //
 // 卖出条件（两个同时满足）：
 //   1. EMA9 从上方下穿 EMA20（本根 EMA9 < EMA20，上根 EMA9 >= EMA20）
@@ -23,7 +23,9 @@ function calcEMA(prices, period) {
 
 // 同时返回当前和上一根 K 线的 EMA9 / EMA20
 function calcEMAPair(closes) {
-  if (!closes || closes.length < 22) return null;
+  if (!closes || closes.length < 22) {
+    return null;
+  }
   const curr9  = calcEMA(closes, 9);
   const curr20 = calcEMA(closes, 20);
   const prev9  = calcEMA(closes.slice(0, -1), 9);
@@ -32,7 +34,7 @@ function calcEMAPair(closes) {
   return { curr9, curr20, prev9, prev20 };
 }
 
-// ── 策略主函数（每根 K 线封口后调用）────────────────────────────────
+// ── 策略主函数（每次 REST 轮询拿到新 K 线后调用）────────────────────
 async function evaluateStrategy(address, candle) {
   const token = tokenStore.getToken(address);
   if (!token || !token.active) return;
@@ -40,14 +42,17 @@ async function evaluateStrategy(address, candle) {
   if (!token.entryPrice)       return;
 
   const closes = token.closes;
-  if (!closes || closes.length < 22) return;
+  if (!closes || closes.length < 22) {
+    console.log(`[Strategy] SKIP ${token.symbol}: closes=${closes?.length ?? 0} < 22, waiting for more data`);
+    return;
+  }
 
   const ema = calcEMAPair(closes);
   if (!ema) return;
 
   const { curr9, curr20, prev9, prev20 } = ema;
 
-  // 实时更新 EMA（Dashboard 显示用）
+  // 实时更新 EMA（供 tokenMonitor 广播到 Dashboard）
   token.ema9  = curr9;
   token.ema20 = curr20;
 
@@ -59,8 +64,8 @@ async function evaluateStrategy(address, candle) {
   }
 
   // ── 卖出判断 ──────────────────────────────────────────────────────
-  const isCrossDown = prev9 >= prev20 && curr9 < curr20;   // 条件1：EMA9 死叉
-  const ema20Flat   = curr20 <= prev20 * 1.001;            // 条件2：EMA20 走平或下行
+  const isCrossDown = prev9 >= prev20 && curr9 < curr20;  // 条件1：EMA9 死叉
+  const ema20Flat   = curr20 <= prev20 * 1.001;           // 条件2：EMA20 走平或下行
 
   if (isCrossDown && ema20Flat) {
     console.log(
@@ -79,6 +84,12 @@ async function evaluateStrategy(address, candle) {
     token.ema20           = null;
     token.pnl             = 0;
     token.sellCount++;
+  } else {
+    console.log(
+      `[Strategy] ${token.symbol} | ` +
+      `EMA9=${curr9.toFixed(8)} EMA20=${curr20.toFixed(8)} | ` +
+      `crossDown=${isCrossDown} ema20Flat=${ema20Flat} | no signal`
+    );
   }
 }
 

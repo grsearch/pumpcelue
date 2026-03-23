@@ -13,8 +13,6 @@ const api = axios.create({
   timeout: 8000,
 });
 
-// ─────────────────────────────────────────────────────────────────
-
 /**
  * 获取代币概览：价格、LP、FDV 等
  */
@@ -38,8 +36,7 @@ async function getTokenOverview(address) {
 }
 
 /**
- * 获取单个代币最新价格（轻量接口，用于 REST 兜底轮询）
- * 使用 /defi/price 接口，比 token_overview 更轻、更快
+ * 获取单个代币最新价格（轻量接口）
  */
 async function getPrice(address) {
   try {
@@ -47,14 +44,12 @@ async function getPrice(address) {
     const val = res.data?.data?.value;
     return val ? parseFloat(val) : null;
   } catch (e) {
-    // 静默失败，兜底轮询允许偶尔失败
     return null;
   }
 }
 
 /**
- * 获取历史 OHLCV（用于 RSI 预热）
- * BirdEye REST 最小粒度 1m，取最近 limit 根
+ * 获取历史 OHLCV（预留，可用于更长周期预热）
  */
 async function getOHLCV(address, limit = 50) {
   try {
@@ -70,4 +65,22 @@ async function getOHLCV(address, limit = 50) {
   }
 }
 
-module.exports = { getTokenOverview, getPrice, getOHLCV };
+/**
+ * 拉取最新 N 根 1m K 线，用于 REST 轮询驱动策略
+ * limit 建议 30（覆盖 EMA20 所需 + 滚动余量）
+ */
+async function getRecentCandles(address, limit = 30) {
+  try {
+    const now  = Math.floor(Date.now() / 1000);
+    const from = now - limit * 60;
+    const res  = await api.get('/defi/ohlcv', {
+      params: { address, type: '1m', time_from: from, time_to: now },
+    });
+    return res.data?.data?.items || [];
+  } catch (e) {
+    console.error('[BirdEye REST] getRecentCandles error:', e.message);
+    return [];
+  }
+}
+
+module.exports = { getTokenOverview, getPrice, getOHLCV, getRecentCandles };

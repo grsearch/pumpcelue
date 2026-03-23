@@ -1,5 +1,5 @@
 // src/webhookSender.js
-// Sends BUY / SELL signals to the downstream trading bot webhook
+// 向下游交易机器人发送 BUY / SELL 信号
 
 const axios = require('axios');
 const config = require('./config');

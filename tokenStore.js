@@ -4,7 +4,7 @@ const EventEmitter = require('events');
 class TokenStore extends EventEmitter {
   constructor() {
     super();
-    this.setMaxListeners(200); // 多币并发时防止 MaxListenersExceededWarning
+    this.setMaxListeners(200);
     this.tokens    = new Map();
     this.signalLog = [];
   }
@@ -30,12 +30,12 @@ class TokenStore extends EventEmitter {
       candles:      [],
       closes:       [],
 
-      // ── EMA（由 strategy.js 实时写入）────────────────────────────
+      // ── EMA（由 strategy.js 实时写入，由 tokenMonitor 广播）──────
       ema9:         null,
       ema20:        null,
 
       // ── 仓位状态 ──────────────────────────────────────────────────
-      hasBought:       false,   // 监控期内是否已买入，true 后不再重复买
+      hasBought:       false,
       positionOpen:    false,
       isFirstPosition: false,
       entryPrice:      null,
@@ -43,12 +43,9 @@ class TokenStore extends EventEmitter {
       pnl:             0,
       sellCount:       0,
 
-      // ── K 线聚合窗口（birdeyeWs 内部使用）───────────────────────
+      // ── K 线聚合窗口（WS 内部使用，已基本弃用）──────────────────
       _candleWindow: null,
     };
-
-    // 注意：不再有 rsi / addPositionOpen / addEntryPrice / additionCount
-    // / firstPosSold / firstPosStopLoss 等旧字段
 
     this.tokens.set(address, token);
     this.emit('tokenAdded', token);
