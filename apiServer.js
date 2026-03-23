@@ -18,15 +18,12 @@ const io = new SocketIO(httpServer, { cors: { origin: '*' } });
 // ── POST /webhook/add-token ───────────────────────────────────────
 app.post('/webhook/add-token', async (req, res) => {
   const { address, symbol, network = 'solana' } = req.body;
-
-  if (!address || !symbol) {
+  if (!address || !symbol)
     return res.status(400).json({ success: false, error: 'address and symbol are required' });
-  }
 
   const existing = tokenStore.getToken(address);
-  if (existing && existing.active) {
+  if (existing && existing.active)
     return res.json({ success: true, message: 'Already in whitelist', token: _safeToken(existing) });
-  }
 
   try {
     tokenStore.addToken(address, symbol, network);
@@ -66,14 +63,19 @@ app.get('/api/status', (req, res) => {
 // ── POST /api/remove-token ────────────────────────────────────────
 app.post('/api/remove-token', async (req, res) => {
   const { address } = req.body;
-  if (!address) return res.status(400).json({ success: false, error: 'address required' });
+  if (!address)
+    return res.status(400).json({ success: false, error: 'address required' });
 
   const token = tokenStore.getToken(address);
-  if (!token) return res.status(404).json({ success: false, error: 'Token not found' });
+  if (!token)
+    return res.status(404).json({ success: false, error: 'Token not found' });
 
   const ws            = require('./birdeyeWs');
+  const { _removeCandleHandlerExternal } = require('./tokenMonitor');
   const webhookSender = require('./webhookSender');
 
+  // 注销 candle 监听器 → 停止 WS → 移除 token → 发 SELL
+  if (_removeCandleHandlerExternal) _removeCandleHandlerExternal(address);
   ws.unsubscribe(address);
   tokenStore.removeToken(address);
 
@@ -89,23 +91,25 @@ app.post('/api/remove-token', async (req, res) => {
 });
 
 // ── Socket.IO ─────────────────────────────────────────────────────
-tokenStore.on('tokenAdded',   (token) => io.emit('tokenAdded', _safeToken(token)));
-tokenStore.on('tokenUpdated', (token) => io.emit('tokenUpdated', {
-  address:         token.address,
-  symbol:          token.symbol,
-  price:           token.price,
-  lp:              token.lp,
-  fdv:             token.fdv,
-  rsi:             null,   // 纯首仓策略不计算 RSI
-  age:             token.age,
-  pnl:             token.pnl,
-  positionOpen:    token.positionOpen,
-  isFirstPosition: token.isFirstPosition,
-  entryPrice:      token.entryPrice,
-  active:          token.active,
+tokenStore.on('tokenAdded',   (t) => io.emit('tokenAdded', _safeToken(t)));
+tokenStore.on('tokenUpdated', (t) => io.emit('tokenUpdated', {
+  address:         t.address,
+  symbol:          t.symbol,
+  price:           t.price,
+  lp:              t.lp,
+  fdv:             t.fdv,
+  ema9:            t.ema9  !== null && t.ema9  !== undefined ? parseFloat(t.ema9.toFixed(8))  : null,
+  ema20:           t.ema20 !== null && t.ema20 !== undefined ? parseFloat(t.ema20.toFixed(8)) : null,
+  age:             t.age,
+  pnl:             t.pnl,
+  hasBought:       t.hasBought,
+  positionOpen:    t.positionOpen,
+  isFirstPosition: t.isFirstPosition,
+  entryPrice:      t.entryPrice,
+  active:          t.active,
 }));
-tokenStore.on('tokenRemoved', (token) => io.emit('tokenRemoved', { address: token.address }));
-tokenStore.on('signalLogged', (entry) => io.emit('signalLogged', entry));
+tokenStore.on('tokenRemoved', (t) => io.emit('tokenRemoved', { address: t.address }));
+tokenStore.on('signalLogged', (e) => io.emit('signalLogged', e));
 tokenStore.on('newCandle',    ({ address, candle }) => io.emit('newCandle', { address, candle }));
 
 // ── Helper ────────────────────────────────────────────────────────
@@ -119,7 +123,9 @@ function _safeToken(t) {
     price:           t.price,
     priceChange:     t.priceChange,
     pnl:             t.pnl,
-    rsi:             null,
+    ema9:            t.ema9  !== null && t.ema9  !== undefined ? parseFloat(t.ema9.toFixed(8))  : null,
+    ema20:           t.ema20 !== null && t.ema20 !== undefined ? parseFloat(t.ema20.toFixed(8)) : null,
+    hasBought:       t.hasBought,
     positionOpen:    t.positionOpen,
     isFirstPosition: t.isFirstPosition,
     entryPrice:      t.entryPrice,
